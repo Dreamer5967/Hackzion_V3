@@ -1,17 +1,807 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Smart Logistics Optimization</title>
-    <!-- Preconnect to Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  </head>
-  <body class="bg-background text-white antialiased">
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Logistics | Master Control</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800;900&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; scroll-behavior: smooth; }
+        #map { height: 450px; border-radius: 2rem; border: 2px solid #1e293b; z-index: 10; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .route-glow { filter: drop-shadow(0 0 10px currentColor); animation: dash 30s linear infinite; }
+        @keyframes dash { to { stroke-dashoffset: -1000; } }
+        input[type="checkbox"], input[type="radio"] { accent-color: #3b82f6; cursor: pointer;}
+        .alert-marker { filter: hue-rotate(150deg); animation: pulse 1s infinite; }
+        .theft-marker { filter: hue-rotate(250deg) saturate(200%); animation: pulse 0.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.5); } 100% { transform: scale(1); } }
+        
+        /* Smooth pop-in for IoT changes */
+        .pop-in { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes popIn { 0% { transform: scale(0.9); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body class="bg-[#0b0f1a] text-slate-300">
+
+    <div id="autoModal" class="fixed inset-0 bg-black/80 z-50 hidden flex justify-center items-center backdrop-blur-sm">
+        <div class="bg-[#161b2b] border border-slate-700 w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl relative">
+            <button onclick="closeAutoModal()" class="absolute top-8 right-8 text-slate-500 hover:text-white"><i class="fas fa-times text-2xl"></i></button>
+            
+            <div class="mb-8">
+                <h2 class="text-3xl font-black text-white italic tracking-tighter uppercase"><i class="fas fa-robot text-blue-500 mr-3"></i>Fleet Automation Wizard</h2>
+                <p class="text-slate-400 font-bold uppercase tracking-widest text-xs mt-2">Deploy multiple units to a single destination</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6 mb-6">
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Origin Hub</label>
+                    <select id="autoStart" class="w-full bg-[#1e293b] rounded-2xl p-4 text-white font-semibold outline-none cursor-pointer border border-slate-700"></select>
+                </div>
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Destination Node</label>
+                    <select id="autoDest" class="w-full bg-[#1e293b] rounded-2xl p-4 text-white font-semibold outline-none cursor-pointer border border-slate-700"></select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6 mb-8">
+                <div>
+                    <label class="text-[10px] font-black text-blue-400 uppercase tracking-widest block mb-2">Fleet Size (Max 25)</label>
+                    <input type="number" id="autoCount" value="5" min="2" max="25" class="w-full bg-[#1e293b] border border-blue-500/30 rounded-2xl p-4 font-black text-xl text-white outline-none">
+                </div>
+                <div>
+                    <label class="text-[10px] font-black text-blue-400 uppercase tracking-widest block mb-2">Commodity Payload</label>
+                    <select id="autoCargoClass" class="w-full bg-[#1e293b] border border-blue-500/30 rounded-2xl p-4 font-bold text-sm text-white outline-none cursor-pointer">
+                        <option>General Objects</option>
+                        <option>Pharmaceuticals</option>
+                        <option>Perishables (Food)</option>
+                        <option>Electronics</option>
+                        <option>Chemicals: Liquid Nitrogen</option>
+                        <option>Chemicals: Sulfuric Acid</option>
+                        <option>Chemicals: Lithium Batteries</option>
+                        <option>Chemicals: Hydrochloric Acid</option>
+                        <option>Chemicals: Sodium Hydroxide</option>
+                        <option>Chemicals: Methanol</option>
+                        <option>Chemicals: Hydrogen Peroxide</option>
+                        <option value="MIXED" class="text-blue-400 italic">Mixed / Random Fleet</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-10">
+                <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-4">Select ML Routing Strategy</label>
+                <div class="grid grid-cols-2 gap-4">
+                    <label class="flex flex-col p-5 bg-emerald-900/10 border border-emerald-500/30 rounded-2xl cursor-pointer hover:bg-emerald-900/30 transition group">
+                        <div class="flex items-center gap-3 mb-2">
+                            <input type="radio" name="autoStrategy" value="fast" checked class="w-5 h-5 accent-emerald-500">
+                            <span class="font-black text-emerald-400 uppercase tracking-widest text-sm">Alpha Priority</span>
+                        </div>
+                        <p class="text-xs text-slate-400 pl-8">Fastest assets. Safe weather. Avoids disruption zones.</p>
+                    </label>
+                    <label class="flex flex-col p-5 bg-rose-900/10 border border-rose-500/30 rounded-2xl cursor-pointer hover:bg-rose-900/30 transition group">
+                        <div class="flex items-center gap-3 mb-2">
+                            <input type="radio" name="autoStrategy" value="slow" class="w-5 h-5 accent-rose-500">
+                            <span class="font-black text-rose-400 uppercase tracking-widest text-sm">Gamma Economy</span>
+                        </div>
+                        <p class="text-xs text-slate-400 pl-8">Cheapest assets. High risk weather & theft zones.</p>
+                    </label>
+                </div>
+            </div>
+
+            <button onclick="launchAutomatedFleet()" class="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-[2rem] font-black uppercase text-lg tracking-[0.2em] transition-all shadow-xl shadow-blue-600/20 active:scale-95">
+                Initialize Automated Fleet
+            </button>
+        </div>
+    </div>
+    <div class="flex flex-col lg:flex-row h-screen">
+        
+        <aside class="w-full lg:w-[450px] bg-[#161b2b] p-8 border-r border-slate-800 flex flex-col h-full overflow-y-auto custom-scrollbar">
+            <div class="flex items-center justify-between mb-8">
+                <div class="flex items-center gap-4">
+                    <div class="bg-blue-600 p-3 rounded-2xl shadow-lg shadow-blue-600/20">
+                        <i class="fas fa-microchip text-white text-xl"></i>
+                    </div>
+                    <h1 class="text-3xl font-black text-white italic tracking-tighter uppercase">Smart <span class="text-blue-500 font-light">Logistics</span></h1>
+                </div>
+            </div>
+
+            <button onclick="openAutoModal()" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 py-4 rounded-2xl font-black uppercase text-[11px] tracking-widest transition-all shadow-xl shadow-blue-600/20 active:scale-95 mb-6 text-white border border-blue-400/30">
+                <i class="fas fa-robot mr-2"></i> Launch Fleet Automation Wizard
+            </button>
+
+            <div class="bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-2xl mb-6">
+                <div class="flex justify-between items-center mb-3">
+                    <div>
+                        <p class="text-xs font-black text-indigo-400 uppercase tracking-widest"><i class="fas fa-layer-group mr-1"></i> Dock Queue</p>
+                        <p class="text-[9px] text-indigo-300/50 uppercase mt-0.5">Manual Batch Dispatch</p>
+                    </div>
+                    <div class="bg-indigo-600 text-white font-black text-xl w-10 h-10 flex items-center justify-center rounded-xl shadow-lg" id="queueCounter">0</div>
+                </div>
+                <div id="queuePreview" class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar pr-2"></div>
+            </div>
+
+            <form class="space-y-5" onsubmit="event.preventDefault();">
+                <div class="space-y-3">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Geospatial Routing</label>
+                    <select id="start" onchange="updateLiveDist()" class="w-full bg-[#1e293b] rounded-2xl p-4 text-white text-lg font-semibold border-none outline-none cursor-pointer"></select>
+                    <div class="flex justify-center -my-3 relative z-10"><i class="fas fa-arrow-down text-blue-500 bg-[#161b2b] p-2 rounded-full border border-slate-700"></i></div>
+                    <select id="destination" onchange="updateLiveDist()" class="w-full bg-[#1e293b] rounded-2xl p-4 text-white text-lg font-semibold border-none outline-none cursor-pointer"></select>
+                </div>
+
+                <div class="bg-blue-900/20 p-5 rounded-3xl border border-blue-500/30">
+                    <label class="text-xs font-black text-blue-400 uppercase block mb-1">Live Distance</label>
+                    <p id="sideDist" class="text-4xl font-black text-white tracking-tighter">0 <span class="text-base font-bold text-slate-500 italic uppercase">KM</span></p>
+                </div>
+
+                <div class="bg-slate-800/30 border border-slate-700 p-5 rounded-2xl">
+                    <label class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-3 block"><i class="fas fa-box-open mr-1"></i> Commodity Class</label>
+                    <select id="cargoClass" onchange="autoCalculateTemp()" class="w-full bg-[#1e293b] rounded-xl p-3 text-white font-semibold outline-none mb-3 cursor-pointer">
+                        <option>General Objects</option><option>Pharmaceuticals</option><option>Perishables (Food)</option><option>Electronics</option>
+                        <option>Chemicals: Liquid Nitrogen</option><option>Chemicals: Sulfuric Acid</option><option>Chemicals: Lithium Batteries</option>
+                        <option>Chemicals: Hydrochloric Acid</option><option>Chemicals: Sodium Hydroxide</option><option>Chemicals: Methanol</option><option>Chemicals: Hydrogen Peroxide</option>
+                    </select>
+
+                    <div class="flex gap-4 mb-4">
+                        <div class="flex-1 bg-[#1e293b] p-3 rounded-xl border border-slate-700">
+                            <label class="text-[10px] text-slate-400 uppercase font-bold block mb-1">Payload (KG)</label>
+                            <input type="number" id="weight" value="500" class="w-full bg-transparent font-black text-xl text-white outline-none">
+                        </div>
+                        <div class="flex-1 bg-blue-900/20 p-3 rounded-xl border border-blue-500/30 relative">
+                            <i class="fas fa-magic text-blue-500 absolute top-2 right-2 text-[10px] animate-pulse"></i>
+                            <label class="text-[10px] text-blue-400 uppercase font-bold block mb-1" title="General goods adapt to weather. Pharma/Food hold strict temps.">IOT Temp (°C)</label>
+                            <input type="number" id="targetTemp" class="w-full bg-transparent font-black text-xl text-blue-300 outline-none transition-colors">
+                            <div id="iotStatusLabel" class="text-[9px] font-black mt-1 uppercase tracking-widest text-center mb-1"></div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 text-sm font-bold text-yellow-500 cursor-pointer bg-yellow-500/10 px-3 py-2 rounded-lg border border-yellow-500/20 flex-1">
+                            <input type="checkbox" id="fragileCheck" value="Fragile"> Fragile
+                        </label>
+                        <label class="flex items-center gap-2 text-sm font-bold text-rose-500 cursor-pointer bg-rose-500/10 px-3 py-2 rounded-lg border border-rose-500/20 flex-1">
+                            <input type="checkbox" id="hazmatCheck" value="HAZMAT"> HAZMAT
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Asset & Environment</label>
+                    <select id="vehicle" class="w-full bg-[#1e293b] rounded-t-2xl p-4 text-white font-semibold border-b border-slate-700 outline-none cursor-pointer">
+                        <option>Refrigerated Truck (Reefer)</option><option>Cargo Plane (Express)</option><option>Heavy Truck (18-Wheeler)</option>
+                        <option>Medium Truck (Eicher)</option><option>Mini Truck (Tata Ace)</option>
+                    </select>
+                    <div class="flex">
+                        <select id="weather" onchange="autoCalculateTemp()" class="w-1/2 bg-[#1e293b] p-4 text-white font-semibold border-r border-slate-700 outline-none rounded-bl-2xl cursor-pointer">
+                            <option>Sunny</option><option>Rainy</option><option>Cold</option><option>Extremely Cold</option><option>Hot</option><option>Extremely Hot</option><option>Stormy</option>
+                        </select>
+                        <select id="traffic" class="w-1/2 bg-[#1e293b] p-4 text-white font-semibold outline-none rounded-br-2xl cursor-pointer">
+                            <option>Clear</option><option>Moderate</option><option>Heavy</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="bg-rose-900/10 border border-rose-500/20 p-4 rounded-2xl">
+                    <label class="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-2 block"><i class="fas fa-triangle-exclamation mr-1"></i> Disruption Simulator</label>
+                    <select id="breakdownSim" class="w-full bg-transparent text-white font-semibold outline-none cursor-pointer">
+                        <option value="None">Normal Operation</option>
+                        <option value="Minor">Inject Minor Breakdown</option>
+                        <option value="Major">Inject Major Critical Failure</option>
+                        <option value="Theft">Inject Security Breach (Theft)</option>
+                    </select>
+                </div>
+
+                <div class="pt-4 border-t border-slate-800">
+                    <button type="button" onclick="createSingleShipment()" class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-2xl font-black uppercase text-[11px] tracking-widest transition-all shadow-xl active:scale-95 mb-4 text-white border border-slate-600">
+                        Manual Single Dispatch
+                    </button>
+
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="h-px bg-slate-700 flex-1"></div>
+                        <span class="text-[9px] font-black text-slate-500 uppercase tracking-widest">QUEUE BATCH CONTROLS</span>
+                        <div class="h-px bg-slate-700 flex-1"></div>
+                    </div>
+
+                    <button type="button" onclick="addToQueue()" class="w-full bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/50 py-3 rounded-2xl font-black uppercase text-[10px] tracking-[0.1em] transition-all active:scale-95 text-indigo-300 mb-3">
+                        <i class="fas fa-plus mr-1"></i> Add To Manual Queue
+                    </button>
+
+                    <div class="flex gap-3">
+                        <button type="button" id="dispatchBatchBtn" onclick="executeBatchDispatch()" disabled class="flex-1 bg-blue-600 opacity-50 py-3 rounded-xl font-black uppercase text-[9px] tracking-widest transition-all shadow-xl shadow-blue-600/20 cursor-not-allowed">
+                            Standard Dispatch
+                        </button>
+                        
+                        <button type="button" id="executeTriageBtn" onclick="executeTriage()" disabled class="flex-1 bg-emerald-600 opacity-50 py-3 rounded-xl font-black uppercase text-[9px] tracking-widest transition-all shadow-xl shadow-emerald-600/20 cursor-not-allowed">
+                            ML Triage Sort
+                        </button>
+                    </div>
+                </div>
+
+            </form>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto p-10 space-y-12 bg-[#0b0f1a] custom-scrollbar">
+            
+            <div id="map" class="shadow-2xl shadow-blue-500/10 relative z-10"></div>
+
+            <div id="statusSection" class="hidden relative z-20">
+                <div class="bg-[#161b2b] rounded-[3.5rem] p-12 border border-slate-800 shadow-2xl relative overflow-hidden">
+                    <div id="statusBar" class="absolute top-0 left-0 h-4 w-full transition-all duration-1000"></div>
+                    <div class="flex flex-wrap justify-between items-start mb-10 gap-6">
+                        <div>
+                            <span id="shipID" class="text-blue-500 font-mono text-lg font-bold tracking-widest bg-blue-500/10 px-5 py-2 rounded-full"></span>
+                            <h2 id="routeTitle" class="text-6xl font-black text-white mt-5 uppercase italic tracking-tighter"></h2>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="text-center px-8 py-5 bg-blue-900/10 rounded-[2rem] border border-blue-500/20">
+                                <p class="text-blue-500 text-xs font-black uppercase tracking-widest mb-2">Time to Target</p>
+                                <span id="liveTimer" class="text-4xl font-mono font-black text-blue-400 tracking-tighter block">00:00:00</span>
+                            </div>
+                            <div class="text-center px-10 py-5 bg-slate-900/80 rounded-[2rem] border border-slate-700">
+                                <p class="text-slate-400 text-xs font-black uppercase tracking-widest mb-2">Live Status</p>
+                                <span id="statBadge" class="text-4xl font-black uppercase tracking-widest block"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-12 border-t border-slate-800 pt-12">
+                        <div><p class="text-slate-500 font-black uppercase text-sm tracking-widest mb-3">Transit Time (ETA)</p><p id="vEta" class="text-6xl font-black text-blue-400 tracking-tighter"></p></div>
+                        <div><p class="text-slate-500 font-black uppercase text-sm tracking-widest mb-3">Net Cost</p><p id="vCost" class="text-6xl font-black text-emerald-400 tracking-tighter"></p></div>
+                        <div><p class="text-slate-500 font-black uppercase text-sm tracking-widest mb-3">ML Risk Matrix</p><p id="vAcc" class="text-6xl font-black text-white tracking-tighter"></p></div>
+                        <div><p class="text-slate-500 font-black uppercase text-sm tracking-widest mb-3">Commodity Class</p><p id="vCargo" class="text-2xl font-bold text-slate-300 leading-tight"></p></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="dispatchPlanSection" class="hidden relative z-20">
+                <div class="mb-6 flex justify-between items-end border-b border-slate-800 pb-4">
+                    <div>
+                        <h2 class="text-3xl font-black text-white uppercase italic tracking-tighter mb-1">Fleet Operations Monitors</h2>
+                        <p id="batchTypeLabel" class="text-blue-400 font-bold uppercase tracking-widest text-xs">Standard Queue Execution</p>
+                    </div>
+                </div>
+                <div id="dispatchPlanCards" class="grid grid-cols-1 xl:grid-cols-2 gap-8"></div>
+            </div>
+
+            <div class="bg-[#161b2b] rounded-[2.5rem] border border-slate-800 shadow-xl overflow-hidden relative z-20">
+                <div class="px-10 py-8 border-b border-slate-800 flex justify-between items-center bg-[#1c2235]/40">
+                    <h3 class="font-black text-xl text-slate-300 italic tracking-[0.2em]">LIVE FLEET TRACKER & ARCHIVE</h3>
+                    <div class="flex gap-8 text-sm font-black text-slate-500 uppercase tracking-widest">
+                        <button onclick="loadHistory()" class="hover:text-white transition"><i class="fas fa-rotate"></i> Sync</button>
+                        <button onclick="clearHistory()" class="text-rose-500 hover:text-rose-400 transition"><i class="fas fa-trash-can"></i> Purge</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead class="bg-[#0b0f1a]/80 text-slate-400 text-xs font-black uppercase tracking-widest border-b border-slate-800">
+                            <tr>
+                                <th class="px-8 py-6">Mode / ID</th>
+                                <th class="px-8 py-6">Commodity / Route</th>
+                                <th class="px-8 py-6">Handling Profiles</th>
+                                <th class="px-8 py-6">Fiscal & Transit Time</th>
+                                <th class="px-8 py-6 text-center">Status Matrix</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logBody" class="divide-y divide-slate-800/60"></tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const API = "http://127.0.0.1:8000"; 
+        const states = ["Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal", "Delhi"];
+        
+        let map = L.map('map', { zoomControl: false }).setView([20.5937, 78.9629], 5);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+        
+        let mapLayers = [];
+        let activeTimers = [];
+        let shipmentQueue = [];
+        
+        let globalArchiveTimer;
+        let archiveShipments = []; 
+
+        const queueColorPalette = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4', '#eab308', '#14b8a6'];
+
+        const cargoIdealTemps = { "General Objects": null, "Pharmaceuticals": 5, "Perishables (Food)": -2, "Electronics": 20, "Chemicals: Liquid Nitrogen": -196, "Chemicals: Sulfuric Acid": 20, "Chemicals: Lithium Batteries": 15, "Chemicals: Hydrochloric Acid": 20, "Chemicals: Sodium Hydroxide": 20, "Chemicals: Methanol": 10, "Chemicals: Hydrogen Peroxide": 5 };
+        const weatherAmbientTemps = { "Extremely Cold": -15, "Cold": 5, "Rainy": 18, "Sunny": 25, "Hot": 35, "Extremely Hot": 45, "Stormy": 20 };
+
+        window.onload = () => {
+            const selects = [document.getElementById('start'), document.getElementById('destination'), document.getElementById('autoStart'), document.getElementById('autoDest')];
+            states.sort().forEach(s => { 
+                selects.forEach(sel => { if(sel) sel.add(new Option(s, s)); }); 
+            });
+            document.getElementById('start').value = "Karnataka"; document.getElementById('destination').value = "Delhi"; 
+            if(document.getElementById('autoStart')) { document.getElementById('autoStart').value = "Maharashtra"; document.getElementById('autoDest').value = "Tamil Nadu"; }
+            
+            updateLiveDist(); autoCalculateTemp(); loadHistory();
+            setTimeout(() => { map.invalidateSize(); }, 500);
+        };
+
+        function autoCalculateTemp() {
+            let cargo = document.getElementById('cargoClass').value;
+            let weather = document.getElementById('weather').value;
+            let tempInput = document.getElementById('targetTemp');
+            let statusLabel = document.getElementById('iotStatusLabel');
+            
+            let ideal = cargoIdealTemps[cargo]; let ambient = weatherAmbientTemps[weather];
+
+            tempInput.classList.remove('pop-in');
+            void tempInput.offsetWidth; 
+            tempInput.classList.add('pop-in');
+
+            if (ideal !== null) {
+                tempInput.value = ideal;
+                tempInput.classList.replace('text-slate-300', 'text-blue-400');
+                if (ambient > ideal + 2) statusLabel.innerHTML = `<span class="text-blue-400"><i class="fas fa-snowflake"></i> Active Cooling (Ambient: ${ambient}°)</span>`;
+                else if (ambient < ideal - 2) statusLabel.innerHTML = `<span class="text-rose-400"><i class="fas fa-fire"></i> Active Heating (Ambient: ${ambient}°)</span>`;
+                else statusLabel.innerHTML = `<span class="text-emerald-400"><i class="fas fa-leaf"></i> Eco Mode</span>`;
+            } else {
+                tempInput.value = ambient;
+                tempInput.classList.replace('text-blue-400', 'text-slate-300');
+                statusLabel.innerHTML = `<span class="text-slate-400"><i class="fas fa-wind"></i> Tracking Ambient</span>`;
+            }
+        }
+
+        async function updateLiveDist() {
+            try {
+                const r = await fetch(`${API}/get-distance`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({start: document.getElementById('start').value, destination: document.getElementById('destination').value}) });
+                const d = await r.json();
+                document.getElementById('sideDist').innerHTML = `${d.distance} <span class="text-xl font-bold text-slate-500 uppercase">KM</span>`;
+            } catch(e) {}
+        }
+
+        function openAutoModal() { document.getElementById('autoModal').classList.remove('hidden'); }
+        function closeAutoModal() { document.getElementById('autoModal').classList.add('hidden'); }
+
+        async function launchAutomatedFleet() {
+            const count = parseInt(document.getElementById('autoCount').value);
+            const strategy = document.querySelector('input[name="autoStrategy"]:checked').value;
+            const start = document.getElementById('autoStart').value;
+            const dest = document.getElementById('autoDest').value;
+            const selectedCargo = document.getElementById('autoCargoClass').value;
+            
+            if (start === dest) { alert("Start and Destination must be different."); return; }
+
+            const cargoKeys = Object.keys(cargoIdealTemps);
+            let bulkPayloads = [];
+
+            for(let i=0; i<count; i++) {
+                let rCargo = selectedCargo === "MIXED" ? cargoKeys[Math.floor(Math.random() * cargoKeys.length)] : selectedCargo;
+                let rWeight = Math.floor(Math.random() * 4000) + 500;
+                
+                let isFast = strategy === 'fast';
+                
+                bulkPayloads.push({
+                    start: start, destination: dest, 
+                    vehicle: isFast ? 'Heavy Truck (18-Wheeler)' : 'Medium Truck (Eicher)', 
+                    weight: rWeight, 
+                    cargo_class: rCargo, 
+                    target_temp: cargoIdealTemps[rCargo] !== null ? cargoIdealTemps[rCargo] : (isFast ? 25 : 10),
+                    handling: [], 
+                    traffic: isFast ? 'Clear' : 'Heavy', 
+                    weather: isFast ? 'Sunny' : 'Stormy', 
+                    breakdown_sim: isFast ? 'None' : (Math.random() > 0.6 ? 'Theft' : 'Major')
+                });
+            }
+
+            closeAutoModal();
+            document.getElementById('statusSection').classList.add('hidden');
+            
+            try {
+                const r = await fetch(`${API}/batch-dispatch`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ shipments: bulkPayloads }) });
+                const data = await r.json();
+                if(!r.ok) { alert(`System Error: ${data.detail}`); return; }
+                
+                document.getElementById('batchTypeLabel').innerText = `Automated Fleet Deployment (${count} Assets)`;
+                document.getElementById('batchTypeLabel').className = "text-blue-400 font-bold uppercase tracking-widest text-xs";
+                
+                displayDualMonitors(data, false); 
+                traceMultiMap(data); 
+                loadHistory(); 
+            } catch(e) { alert("Server Connection Lost."); }
+        }
+
+        function getPayload() {
+            let handlingTags = [];
+            if(document.getElementById('fragileCheck').checked) handlingTags.push("Fragile");
+            if(document.getElementById('hazmatCheck').checked) handlingTags.push("HAZMAT");
+
+            return { 
+                start: document.getElementById('start').value, destination: document.getElementById('destination').value, 
+                vehicle: document.getElementById('vehicle').value, weight: parseFloat(document.getElementById('weight').value), 
+                cargo_class: document.getElementById('cargoClass').value, target_temp: document.getElementById('targetTemp').value ? parseFloat(document.getElementById('targetTemp').value) : null,
+                handling: handlingTags, traffic: document.getElementById('traffic').value, weather: document.getElementById('weather').value, breakdown_sim: document.getElementById('breakdownSim').value
+            };
+        }
+
+        async function createSingleShipment() {
+            const payload = getPayload();
+            try {
+                const r = await fetch(`${API}/create-shipment`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+                const data = await r.json();
+                if(!r.ok) { alert(`Logistics Constraint: ${data.detail}`); return; }
+                
+                document.getElementById('dispatchPlanSection').classList.add('hidden');
+                displaySingle(data);
+                traceMultiMap([data]); 
+                loadHistory(); 
+            } catch(e) { alert("Server Connection Lost."); }
+        }
+
+        function addToQueue() {
+            const payload = getPayload();
+            shipmentQueue.push(payload);
+            
+            document.getElementById('queueCounter').innerText = shipmentQueue.length;
+            const previewBox = document.getElementById('queuePreview');
+            previewBox.innerHTML += `
+                <div class="bg-indigo-950/50 border border-indigo-500/20 p-3 rounded-xl flex justify-between items-center">
+                    <div>
+                        <p class="text-xs font-bold text-white truncate w-48">${payload.cargo_class}</p>
+                        <p class="text-[10px] text-indigo-300 font-mono mt-1">${payload.start} ➔ ${payload.destination}</p>
+                    </div>
+                    <span class="bg-indigo-600 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded text-white">#${shipmentQueue.length}</span>
+                </div>
+            `;
+
+            const btn1 = document.getElementById('dispatchBatchBtn');
+            const btn2 = document.getElementById('executeTriageBtn');
+            [btn1, btn2].forEach(btn => { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); });
+            btn1.classList.add('hover:bg-blue-500', 'active:scale-95');
+            btn2.classList.add('hover:bg-emerald-500', 'active:scale-95');
+        }
+
+        function resetQueueState() {
+            shipmentQueue = [];
+            document.getElementById('queueCounter').innerText = "0";
+            document.getElementById('queuePreview').innerHTML = "";
+            const btn1 = document.getElementById('dispatchBatchBtn');
+            const btn2 = document.getElementById('executeTriageBtn');
+            [btn1, btn2].forEach(btn => {
+                btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed');
+                btn.classList.remove('active:scale-95', 'hover:bg-blue-500', 'hover:bg-emerald-500');
+            });
+        }
+
+        async function executeBatchDispatch() {
+            if (shipmentQueue.length === 0) return;
+            try {
+                const r = await fetch(`${API}/batch-dispatch`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ shipments: shipmentQueue }) });
+                const data = await r.json();
+                if(!r.ok) { alert(`System Error: ${data.detail}`); return; }
+                
+                document.getElementById('statusSection').classList.add('hidden');
+                document.getElementById('batchTypeLabel').innerText = "Standard Manual Queue Execution";
+                document.getElementById('batchTypeLabel').className = "text-blue-400 font-bold uppercase tracking-widest text-xs";
+                
+                displayDualMonitors(data, false); 
+                traceMultiMap(data); 
+                loadHistory(); 
+                resetQueueState();
+            } catch(e) { alert("Server Connection Lost."); }
+        }
+
+        async function executeTriage() {
+            if (shipmentQueue.length === 0) return;
+            try {
+                const r = await fetch(`${API}/batch-triage`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ shipments: shipmentQueue }) });
+                const data = await r.json();
+                if(!r.ok) { alert(`System Error: ${data.detail}`); return; }
+                
+                document.getElementById('statusSection').classList.add('hidden'); 
+                document.getElementById('batchTypeLabel').innerText = "ML Risk-Sorted Execution";
+                document.getElementById('batchTypeLabel').className = "text-emerald-400 font-bold uppercase tracking-widest text-xs";
+
+                displayDualMonitors(data, true); 
+                traceMultiMap(data); 
+                loadHistory(); 
+                resetQueueState();
+            } catch(e) { alert("Server Connection Lost."); }
+        }
+
+        function displayDualMonitors(shipments, isTriaged) {
+            document.getElementById('dispatchPlanSection').classList.remove('hidden');
+            const container = document.getElementById('dispatchPlanCards');
+            container.innerHTML = ""; 
+            
+            activeTimers.forEach(clearInterval); activeTimers = [];
+
+            shipments.slice(0, 2).forEach((s) => {
+                const isFirst = s.dispatch_order === 1;
+                const cColor = (isTriaged && isFirst) ? 'emerald' : 'blue';
+                const isBroken = s.breakdown !== null;
+                const isTheft = isBroken && s.breakdown.type.includes("Security");
+                const bColor = isTheft ? 'purple' : isBroken ? 'rose' : cColor;
+
+                let html = `
+                <div class="bg-[#161b2b] rounded-[3rem] p-10 border border-${bColor}-500/50 shadow-2xl relative overflow-hidden flex flex-col justify-between">
+                    <div class="absolute top-0 left-0 h-4 w-full bg-${bColor}-500 ${isBroken ? 'animate-pulse' : ''}"></div>
+                    <div class="absolute top-6 right-6 bg-${bColor}-500/20 text-${bColor}-400 font-black px-4 py-1.5 rounded-full text-xs uppercase border border-${bColor}-500/50 tracking-widest">
+                        Dispatch #${s.dispatch_order}
+                    </div>
+                    <div>
+                        <span class="text-${cColor}-500 font-mono text-sm font-bold tracking-widest bg-${cColor}-500/10 px-3 py-1 rounded-full">${s.id}</span>
+                        <h2 class="text-3xl font-black text-white mt-5 uppercase italic tracking-tighter truncate">${s.origin} <br><span class="text-xl text-slate-500">➔ ${s.destination}</span></h2>
+                    </div>
+                    <div class="flex gap-4 mt-8 mb-10">
+                        <div class="flex-1 bg-slate-900/80 rounded-2xl p-5 border border-slate-700/50 text-center">
+                            <p class="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Target Time</p>
+                            <span id="timer_${s.id}" class="text-3xl font-mono font-black text-${isTheft ? 'purple' : isBroken ? 'rose' : cColor}-400 block tracking-tighter">00:00:00</span>
+                        </div>
+                        <div class="flex-1 bg-slate-900/80 rounded-2xl p-5 border border-slate-700/50 text-center">
+                            <p class="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Status</p>
+                            <span class="text-xl mt-1.5 font-black uppercase tracking-widest block text-${isTheft ? 'purple' : isBroken ? 'rose' : cColor}-400 ${isBroken ? 'animate-pulse' : ''}">${s.status}</span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-y-8 gap-x-4 border-t border-slate-800 pt-8">
+                        <div><p class="text-slate-500 font-black uppercase text-[10px] tracking-widest mb-1">ETA</p><p class="text-2xl font-black text-${cColor}-400 tracking-tighter">${s.eta}</p></div>
+                        <div><p class="text-slate-500 font-black uppercase text-[10px] tracking-widest mb-1">Cost / Loss</p><p class="text-2xl font-black text-white tracking-tighter truncate">${s.cost !== "N/A" ? s.cost : s.breakdown.fee}</p></div>
+                        <div><p class="text-slate-500 font-black uppercase text-[10px] tracking-widest mb-1">ML Risk</p><p class="text-2xl font-black ${s.ml_telemetry.risk_classification === 'High' ? 'text-rose-400' : 'text-emerald-400'} tracking-tighter">${s.ml_telemetry.route_risk_level}/100</p></div>
+                        <div><p class="text-slate-500 font-black uppercase text-[10px] tracking-widest mb-1">Cargo</p><p class="text-sm mt-1 font-bold text-slate-300 leading-tight truncate">${s.cargo_class}</p></div>
+                    </div>
+                </div>`;
+                
+                container.innerHTML += html;
+                if(s.delivery_iso) startSpecificCountdown(s.delivery_iso, `timer_${s.id}`, isBroken, isTheft, cColor);
+            });
+            document.getElementById('dispatchPlanSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function displaySingle(d) {
+            document.getElementById('statusSection').classList.remove('hidden');
+            document.getElementById('shipID').innerText = d.id;
+            document.getElementById('routeTitle').innerText = `${d.origin} → ${d.destination}`;
+            document.getElementById('vEta').innerText = d.eta; 
+            document.getElementById('vCost').innerText = d.cost !== "N/A" ? d.cost : d.breakdown.fee;
+            document.getElementById('vAcc').innerText = d.ml_telemetry.risk_classification;
+            document.getElementById('vCargo').innerHTML = `${d.cargo_class}<br><span class="text-blue-400 italic text-xl mt-2 block">IOT Target: ${d.ml_telemetry.iot_temperature}°C</span>`;
+            
+            const isBroken = d.breakdown !== null; 
+            const isTheft = isBroken && d.breakdown.type.includes("Security");
+            const isOk = d.status === "On Time";
+            
+            const colorClass = isTheft ? 'text-purple-400' : isOk ? 'text-blue-400' : isBroken ? 'text-rose-500 animate-pulse' : 'text-yellow-400';
+            const bgClass = isTheft ? 'bg-purple-500 shadow-purple-500/50' : isOk ? 'bg-blue-500 shadow-blue-500/20' : isBroken ? 'bg-rose-500 shadow-rose-500/50' : 'bg-yellow-500 shadow-yellow-500/20';
+
+            document.getElementById('statBadge').innerText = d.status;
+            document.getElementById('statBadge').className = `text-4xl font-black uppercase tracking-widest block ${colorClass}`;
+            document.getElementById('statusBar').className = `absolute top-0 left-0 h-4 w-full transition-all duration-1000 shadow-xl ${bgClass}`;
+            
+            activeTimers.forEach(clearInterval); activeTimers = [];
+            if(d.delivery_iso) startSpecificCountdown(d.delivery_iso, 'liveTimer', isBroken, isTheft, 'blue');
+            document.getElementById('statusSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function traceMultiMap(shipments) {
+            map.invalidateSize();
+            mapLayers.forEach(layer => map.removeLayer(layer));
+            mapLayers = [];
+            let bounds = L.latLngBounds();
+
+            shipments.forEach((s) => {
+                if(!s.coords) return;
+                
+                let colorStr = '#00e6ff'; 
+                let dashStyle = '15, 15';
+                let labelText = 'Direct Dispatch Target';
+
+                if (s.dispatch_order !== null && s.dispatch_order !== undefined) {
+                    colorStr = queueColorPalette[(s.dispatch_order - 1) % queueColorPalette.length];
+                    dashStyle = s.dispatch_order === 1 ? '15, 15' : '5, 10';
+                    labelText = `Asset #${s.dispatch_order} Target`;
+                }
+                
+                let isThick = (!s.dispatch_order || s.dispatch_order === 1);
+                
+                let line = L.polyline(s.coords, { color: colorStr, weight: isThick ? 6 : 3, dashArray: dashStyle, className: 'route-glow', opacity: 0.8 }).addTo(map);
+                let start = L.circleMarker(s.coords[0], {color: colorStr, radius: 8}).addTo(map);
+                let end = L.marker(s.coords[1]).addTo(map).bindPopup(`<b>${labelText}:</b><br>${s.destination}`);
+                
+                mapLayers.push(line, start, end);
+                if(isThick) end.openPopup();
+                bounds.extend(line.getBounds());
+
+                if (s.breakdown) {
+                    let midLat = (s.coords[0][0] + s.coords[1][0]) / 2; let midLng = (s.coords[0][1] + s.coords[1][1]) / 2;
+                    midLat += (Math.random() - 0.5) * 0.5;
+                    midLng += (Math.random() - 0.5) * 0.5;
+
+                    let isTheft = s.breakdown.type.includes("Security");
+                    let mColor = isTheft ? '#a855f7' : '#f43f5e';
+                    let mClass = isTheft ? 'theft-marker' : 'alert-marker';
+                    let bMark = L.circleMarker([midLat, midLng], {color: mColor, fillColor: mColor, fillOpacity: 0.8, radius: 12, className: mClass}).addTo(map).bindPopup(`<b>${isTheft ? 'SECURITY BREACH' : 'CRITICAL FAILURE'} (${s.id})</b><br>${s.breakdown.action}`).openPopup();
+                    line.setStyle({color: mColor, opacity: 1, weight: 5}); 
+                    mapLayers.push(bMark);
+                }
+            });
+
+            if(bounds.isValid()) map.fitBounds(bounds, { padding: [80, 80] });
+        }
+
+        function startSpecificCountdown(isoString, elementId, isBroken, isTheft, defaultColor) {
+            const targetTime = new Date(isoString).getTime();
+            const timerDisplay = document.getElementById(elementId);
+            
+            if (isTheft) {
+                timerDisplay.innerText = "SIGNAL LOST"; 
+                timerDisplay.className = `text-3xl font-mono font-black text-purple-400 block tracking-tighter animate-pulse`; 
+                return;
+            } else if (isBroken) { 
+                timerDisplay.innerText = "HALTED"; 
+                timerDisplay.className = `text-3xl font-mono font-black text-rose-500 block tracking-tighter animate-pulse`; 
+                return; 
+            }
+
+            let interval = setInterval(() => {
+                const diff = targetTime - new Date().getTime();
+                if (diff <= 0) { 
+                    clearInterval(interval); 
+                    timerDisplay.innerText = "ARRIVED"; 
+                    timerDisplay.classList.replace(`text-${defaultColor}-400`, "text-emerald-400"); 
+                    return; 
+                }
+                const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)).toString().padStart(2, '0');
+                const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)).toString().padStart(2, '0');
+                const s = Math.floor((diff % (1000 * 60)) / 1000).toString().padStart(2, '0');
+                timerDisplay.innerText = `${h}:${m}:${s}`;
+            }, 1000);
+            activeTimers.push(interval);
+        }
+
+        async function loadHistory() {
+            try {
+                const r = await fetch(`${API}/history`); const h = await r.json();
+                
+                if (h.length > 0 && mapLayers.length === 0) {
+                    let lastBatch = [];
+                    let idx = h.length - 1;
+                    while (idx >= 0 && h[idx].dispatch_order !== null) { lastBatch.push(h[idx]); idx--; }
+                    if (lastBatch.length === 0) lastBatch.push(h[h.length - 1]); 
+                    traceMultiMap(lastBatch); 
+                }
+
+                archiveShipments = h.reverse();
+                const b = document.getElementById('logBody'); b.innerHTML = '';
+                
+                archiveShipments.forEach(s => {
+                    let handlingHTML = "";
+                    if (s.handling.includes("Fragile")) handlingHTML += `<span class="px-3 py-1 bg-yellow-500/20 text-yellow-500 border border-yellow-500/40 rounded text-xs font-black uppercase mr-2 mb-2 inline-block"><i class="fas fa-wine-glass"></i> Fragile</span>`;
+                    if (s.handling.includes("HAZMAT") || s.cargo_class.includes("Chemicals")) handlingHTML += `<span class="px-3 py-1 bg-rose-500/20 text-rose-400 border border-rose-500/40 rounded text-xs font-black uppercase mr-2 mb-2 inline-block"><i class="fas fa-biohazard"></i> HAZMAT</span>`;
+                    if (s.ml_telemetry.iot_temperature < 10) handlingHTML += `<span class="px-3 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/40 rounded text-xs font-black uppercase inline-block mb-2"><i class="fas fa-snowflake"></i> Cold Chain</span>`;
+
+                    let rankBadge = s.dispatch_order !== null && s.dispatch_order !== undefined
+                        ? `<span class="bg-indigo-600/30 text-indigo-400 border border-indigo-500/50 w-8 h-8 flex items-center justify-center rounded-lg font-black shadow-lg">#${s.dispatch_order}</span>`
+                        : `<span class="bg-blue-600/20 text-blue-400 border border-blue-500/30 w-8 h-8 flex items-center justify-center rounded-lg font-black shadow-lg" title="Direct Flight"><i class="fas fa-paper-plane"></i></span>`;
+
+                    let rowHTML = `<tr class="hover:bg-slate-700/20 transition border-b border-slate-800/50">
+                        <td class="px-8 py-6">
+                            <div class="flex items-center gap-3">
+                                ${rankBadge}
+                                <div><div class="text-blue-500 font-mono font-black tracking-widest text-sm">${s.id}</div><div class="text-[10px] text-slate-500 uppercase font-bold">${s.ship_date}</div></div>
+                            </div>
+                        </td>
+                        <td class="px-8 py-6">
+                            <div class="font-bold text-white text-lg mb-1">${s.cargo_class}</div>
+                            <div class="font-black text-slate-400 text-sm uppercase italic tracking-tighter mt-1 bg-slate-800/50 inline-block px-3 py-1 rounded">${s.origin} ➔ ${s.destination} (${s.distance_km} KM)</div>
+                        </td>
+                        <td class="px-8 py-6"><div class="flex flex-wrap mb-2">${handlingHTML || '<span class="text-slate-600 text-xs font-bold uppercase">Standard Handled</span>'}</div><div class="text-xs text-slate-400 font-black uppercase tracking-widest italic mt-2">${s.mode} | ${s.vehicle}</div></td>
+                        
+                        <td class="px-8 py-6 w-64">
+                            <div class="text-emerald-400 font-black text-3xl tracking-tighter mb-2">${s.cost !== "N/A" ? s.cost : '<span class="text-rose-500 text-xl tracking-widest">INSURANCE CLAIM</span>'}</div>
+                            <div class="flex justify-between items-end mb-1.5">
+                                <div class="text-[10px] text-slate-500 font-black uppercase tracking-widest">Transit</div>
+                                <div class="text-[10px] text-blue-400 font-black uppercase tracking-widest">ETA: ${s.eta}</div>
+                            </div>
+                            <div class="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
+                                <div id="prog-bar-${s.id}" class="bg-blue-500 h-full rounded-full transition-all duration-1000" style="width: 0%"></div>
+                            </div>
+                            <div id="prog-time-${s.id}" class="text-[9px] text-slate-500 font-mono mt-1.5 text-right">Calculating...</div>
+                        </td>
+
+                        <td class="px-8 py-6 text-center">
+                            <span id="status-badge-${s.id}" class="px-5 py-2.5 rounded-xl text-xs font-black border tracking-widest ${s.status === 'CARGO STOLEN' ? 'border-purple-500/30 text-purple-400 bg-purple-500/10' : s.status === 'CRITICAL FAILURE' ? 'border-rose-500/30 text-rose-400 bg-rose-500/10' : s.ml_telemetry.risk_classification === 'Low' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : s.ml_telemetry.risk_classification === 'Medium' ? 'border-yellow-500/30 text-yellow-500 bg-yellow-500/10' : 'border-orange-500/30 text-orange-400 bg-orange-500/10'} block mb-2">${s.status.toUpperCase()}</span>
+                            <div class="text-xs text-slate-400 font-bold font-mono">Disruption Risk: ${s.ml_telemetry.disruption_likelihood_score}</div>
+                        </td>
+                    </tr>`;
+
+                    if (s.breakdown) {
+                        let isTheft = s.breakdown.type.includes("Security");
+                        let alertColor = isTheft ? 'purple' : 'rose';
+                        rowHTML += `<tr class="bg-${alertColor}-900/5"><td colspan="5" class="px-8 py-4 border-b border-${alertColor}-900/30"><div class="flex items-center gap-6 p-4 border border-${alertColor}-500/30 bg-${alertColor}-950/20 rounded-2xl"><div class="text-${alertColor}-500 text-3xl"><i class="fas fa-${isTheft ? 'user-ninja' : 'triangle-exclamation'} animate-pulse"></i></div><div class="flex-1"><h4 class="text-${alertColor}-400 font-black tracking-widest uppercase text-sm mb-1">Incident Report: ${s.breakdown.type}</h4><p class="text-slate-300 text-sm">${s.breakdown.action}</p></div><div class="text-right border-l border-${alertColor}-900/50 pl-6"><p class="text-${alertColor}-400 font-mono font-bold">Added Delay: ${s.breakdown.delay}</p><p class="text-${alertColor}-400 font-mono font-bold mt-1">${isTheft ? '' : 'Recovery Fee: '}${s.breakdown.fee}</p></div></div></td></tr>`;
+                    }
+                    b.innerHTML += rowHTML;
+                });
+
+                if (globalArchiveTimer) clearInterval(globalArchiveTimer);
+                globalArchiveTimer = setInterval(updateArchiveTimers, 1000);
+                updateArchiveTimers(); 
+            } catch(e) {}
+        }
+
+        function updateArchiveTimers() {
+            const now = new Date().getTime();
+            
+            archiveShipments.forEach(s => {
+                if (!s.ship_iso || !s.delivery_iso) return;
+                
+                const start = new Date(s.ship_iso).getTime();
+                const end = new Date(s.delivery_iso).getTime();
+                const total = end - start;
+                const elapsed = now - start;
+                
+                let progress = 0;
+                let isDelivered = false;
+                let isHalted = s.breakdown && s.breakdown.type.includes("Major");
+                let isTheft = s.breakdown && s.breakdown.type.includes("Security");
+
+                const progBar = document.getElementById(`prog-bar-${s.id}`);
+                const progTime = document.getElementById(`prog-time-${s.id}`);
+                const statusBadge = document.getElementById(`status-badge-${s.id}`);
+
+                if (!progBar || !progTime) return;
+
+                if (isTheft) {
+                    progBar.style.width = `100%`;
+                    progBar.className = "bg-purple-500 h-full rounded-full transition-all duration-1000";
+                    progTime.innerText = "GPS CONNECTION LOST";
+                    progTime.className = "text-[9px] text-purple-400 font-mono font-bold mt-1.5 text-right animate-pulse";
+                    if(statusBadge && statusBadge.innerText !== "CARGO STOLEN") {
+                        statusBadge.innerText = "CARGO STOLEN";
+                        statusBadge.className = "px-5 py-2.5 rounded-xl text-xs font-black border tracking-widest border-purple-500/30 text-purple-400 bg-purple-500/10 block mb-2 animate-pulse";
+                    }
+                    return;
+                }
+
+                if (isHalted) {
+                    progress = Math.min((elapsed / total) * 100, 100);
+                    progBar.style.width = `${progress}%`;
+                    progBar.className = "bg-rose-500 h-full rounded-full transition-all duration-1000";
+                    progTime.innerText = "HALTED - CRITICAL FAILURE";
+                    progTime.className = "text-[9px] text-rose-500 font-mono font-bold mt-1.5 text-right animate-pulse";
+                    if(statusBadge && statusBadge.innerText !== "CRITICAL FAILURE") {
+                        statusBadge.innerText = "CRITICAL FAILURE";
+                        statusBadge.className = "px-5 py-2.5 rounded-xl text-xs font-black border tracking-widest border-rose-500/30 text-rose-400 bg-rose-500/10 block mb-2 animate-pulse";
+                    }
+                    return;
+                }
+
+                if (elapsed >= total) {
+                    progress = 100;
+                    isDelivered = true;
+                } else {
+                    progress = Math.max(0, (elapsed / total) * 100);
+                }
+
+                progBar.style.width = `${progress}%`;
+                
+                if (isDelivered) {
+                    progTime.innerText = "DELIVERED SUCCESSFULLY";
+                    progTime.className = "text-[10px] text-emerald-400 font-black tracking-widest mt-1.5 text-right";
+                    progBar.className = "bg-emerald-500 h-full rounded-full shadow-[0_0_8px_#10b981] transition-all duration-1000";
+                    
+                    if (statusBadge && statusBadge.innerText !== "DELIVERED") {
+                        statusBadge.innerText = "DELIVERED";
+                        statusBadge.className = "px-5 py-2.5 rounded-xl text-xs font-black border tracking-widest border-emerald-500/30 text-emerald-400 bg-emerald-500/10 block mb-2 shadow-[0_0_15px_rgba(16,185,129,0.2)]";
+                    }
+                } else {
+                    const diff = end - now;
+                    const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)).toString().padStart(2, '0');
+                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)).toString().padStart(2, '0');
+                    const sec = Math.floor((diff % (1000 * 60)) / 1000).toString().padStart(2, '0');
+                    
+                    progTime.innerText = `${h}h ${m}m ${sec}s REMAINING`;
+                    progTime.className = "text-[9px] text-blue-400 font-mono mt-1.5 text-right";
+                    progBar.className = "bg-blue-500 h-full rounded-full shadow-[0_0_8px_#3b82f6] transition-all duration-1000";
+                }
+            });
+        }
+
+        async function clearHistory() { if(confirm("Permanently wipe archival logs?")) { await fetch(`${API}/clear-history`, {method:"DELETE"}); location.reload(); } }
+    </script>
+</body>
 </html>
